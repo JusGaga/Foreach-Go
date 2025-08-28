@@ -61,14 +61,14 @@ func sameMultiset(a, b string) bool {
 }
 
 // AutoAttemptFor génère une tentative plausible pour démo (anagramme par shuffle).
-func AutoAttemptFor(e *Encounter) string {
-	w := []rune(e.word.Text)
+func AutoAttemptFor(e Encounter) string {
+	w := []rune(e.Word.Text)
 	for i := range w {
 		j := rand.Intn(i + 1)
 		w[i], w[j] = w[j], w[i]
 	}
 	cand := string(w)
-	if strings.EqualFold(cand, e.word.Text) {
+	if strings.EqualFold(cand, e.Word.Text) {
 		cand = cand + "x"
 	} // garantit différent
 	return cand

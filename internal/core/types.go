@@ -1,5 +1,7 @@
 package core
 
+import "context"
+
 // Rarity représente la rareté d'un WordMon.
 type Rarity string
 
@@ -29,4 +31,19 @@ type Player struct {
 type SpawnEvent struct {
 	Round int
 	Word  Word
+}
+
+type Encounter struct {
+	Phase     State
+	Player    *Player
+	Word      Word
+	Challenge Challenge
+	Cancel    context.CancelFunc
+}
+
+type Attempts struct {
+	Round  int
+	Player Player
+	Word   Word
+	Won    bool
 }

@@ -1,0 +1,16 @@
+{
+ "updatedAt": "2025-08-27T13:18:50.5981905Z",
+ "players": [
+  {
+   "id": "ID",
+   "name": "Guest",
+   "xp": 25,
+   "level": 1,
+   "inventory": {
+    "chat": 6,
+    "pomme": 2,
+    "route": 2
+   }
+  }
+ ]
+}

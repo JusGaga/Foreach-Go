@@ -1,6 +1,11 @@
 package core
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+	"math/rand"
+	"time"
+)
 
 // LevelFromXP calcule un niveau simple: 1 + XP/100.
 func LevelFromXP(xp int) int {
@@ -29,9 +34,9 @@ func Capture(p *Player, w Word) (int, error) {
 	return w.Points, nil
 }
 
-func NewPlayer(name string) *Player {
-	return &Player{
-		ID:        "p1",
+func NewPlayer(name string) Player {
+	return Player{
+		ID:        "ID",
 		Name:      name,
 		XP:        0,
 		Level:     1,
@@ -39,7 +44,88 @@ func NewPlayer(name string) *Player {
 	}
 }
 
-func PrintPlayer(p *Player) {
+func PrintPlayer(p Player) {
 	fmt.Printf("Joueur: %s | XP: %d | Level: %d | Inventaire: %d mot(s)\n",
 		p.Name, p.XP, p.Level, len(p.Inventory))
+}
+
+// StartListen orchestre les rounds en utilisant la machine d'états Encounter.
+func StartListen(ctx context.Context, p *Player, spawns chan SpawnEvent, attempts chan Attempts, interval time.Duration, enc Encounter) {
+	if interval <= 0 {
+		interval = time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	// Timeout de combat par WordMon
+	battleTimeout := 5 * time.Second
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+
+		case ev, ok := <-spawns:
+			if !ok {
+				return
+			}
+
+			// Démarrage du combat (IN_BATTLE)
+			if err := enc.BeginBattle(); err != nil {
+				fmt.Printf("[Round %d] Erreur BeginBattle pour %q: %v\n", ev.Round, enc.Word.Text, err)
+				// Impossible de combattre, on passe à FLED et on revient à IDLE
+				fmt.Printf("[Annonce] Rencontre interrompue: %q → état=%s\n", enc.Word.Text, enc.State())
+				continue
+			}
+			fmt.Printf("[Round %d] Combat lancé contre %q → état=%s\n", ev.Round, enc.Word.Text, enc.State())
+
+			// Le joueur décide éventuellement de tenter la capture
+			if rand.Intn(100) < 80 {
+				fmt.Printf("[%s] tente: %q (round %d)\n", p.Name, ev.Word.Text, ev.Round)
+
+				test := AutoAttemptFor(enc)
+				if won, err := enc.SubmitAttempt(test); err != nil {
+					fmt.Println("erreur:", err)
+					return
+				} else {
+					// On envoie la tentative avec le résultat (Won) dans le canal
+					attempts <- Attempts{
+						Player: *p,
+						Word:   ev.Word,
+						Round:  ev.Round,
+						Won:    won,
+					}
+				}
+			} else {
+				enc.Phase = StateEncounter
+			}
+
+			// Fenêtre de combat: première tentative reçue ⇒ victoire/défaite, sinon timeout
+			select {
+			case att := <-attempts:
+				// Résolution (CAPTURED/FLED) puis retour à IDLE
+				if err := enc.Resolve(); err != nil {
+					fmt.Printf("[Round %d] Erreur de résolution pour %q: %v\n", att.Round, enc.Word.Text, err)
+				}
+				issue := map[bool]string{true: "VICTOIRE", false: "DEFAITE"}[att.Won]
+				if att.Won == true {
+					if points, err := Capture(p, att.Word); err != nil {
+						fmt.Printf("[Round %d] Erreur: %q \n", att.Round, err)
+					} else if points > 0 {
+						fmt.Printf("[Round %d] Capture de %q\n", att.Round, att.Word.Text)
+					}
+				}
+				fmt.Printf("[Annonce] Issue du combat (round %d) pour %q: joueur %s → %s\n",
+					att.Round, att.Word.Text, att.Player.Name, issue)
+
+			case <-time.After(battleTimeout):
+				// Aucune tentative dans le délai → le WordMon s’enfuit
+				fmt.Printf("[Round %d] %q s’est enfui (timeout %s) → état=%s\n",
+					ev.Round, enc.Word.Text, battleTimeout, enc.State())
+				// Annonce globale
+				fmt.Printf("[Annonce] Aucun vainqueur (round %d) pour %q, expiration du délai.\n",
+					ev.Round, enc.Word.Text)
+			}
+		}
+	}
 }

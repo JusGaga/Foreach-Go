@@ -4,16 +4,31 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log"
 	"math/rand"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
+	"github.com/jusgaga/wordmon-go/internal/config"
 	"github.com/jusgaga/wordmon-go/internal/core"
 )
 
 var Version = "0.0.1" // peut être surchargée via -ldflags "-X 'main.Version=0.1.0'"
 
 func main() {
+	// Charger toutes les configurations
+	gameData, err := config.LoadAll()
+	if err != nil {
+		log.Fatal("[main] Échec du chargement des configurations:", err)
+	}
+
+	// Afficher les informations de configuration
+	fmt.Printf("-------------------------------------------------\n")
+	fmt.Printf("WordMon Go v%s — Configuration chargée !\n", gameData.Game.Game.Version)
+	fmt.Printf("-------------------------------------------------\n")
+
 	var (
 		showVersion bool
 		playerName  string
@@ -31,8 +46,6 @@ func main() {
 		os.Exit(0)
 	}
 
-	fmt.Printf("WordMon Go v%v — prêt !\n", Version)
-
 	if playerName == "" {
 		playerName = "Guest"
 	}
@@ -44,43 +57,52 @@ func main() {
 	// ===== Exo 02: une rencontre simple =====
 	core.PrintPlayer(p)
 
-	e := core.NewEncounter()
-	if err := e.Start(p); err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Gestion de l'arrêt propre avec sauvegarde
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Goroutine pour gérer l'arrêt propre
+	go func() {
+		<-sigChan
+		log.Println("[main] Arrêt demandé, sauvegarde en cours...")
+
+		// Sauvegarder le snapshot
+		if err := config.SaveSnapshot([]core.Player{p}, ""); err != nil {
+			log.Printf("[main] Erreur lors de la sauvegarde: %v", err)
+		} else {
+			log.Println("[main] Snapshot sauvegardé avec succès")
+		}
+
+		cancel()
+	}()
+
+	enc := core.NewEncounter()
+
+	spawnsCh := make(chan core.SpawnEvent, 1)
+	attemptsCh := make(chan core.Attempts, 1)
+
+	// Utiliser l'intervalle de spawn depuis la configuration
+	spawnInterval := gameData.Game.SpawnInterval()
+	if spawnInterval == 0 {
+		spawnInterval = 30 * time.Second // fallback
+	}
+
+	if err := enc.Start(&p, spawnsCh, spawnInterval); err != nil {
 		fmt.Println("erreur:", err)
 		return
 	}
-	fmt.Println("Un WordMon apparaît:", e.WordMon().Presentation())
 
-	if err := e.BeginBattle(); err != nil {
-		fmt.Println("erreur:", err)
-		return
-	}
-	fmt.Println("Défi:", e.CurrentChallenge().Instructions())
+	log.Printf("[main] Démarrage du jeu avec intervalle de spawn: %v", spawnInterval)
+	core.StartListen(ctx, &p, spawnsCh, attemptsCh, spawnInterval, enc)
 
-	// Simulation: on génère une tentative plausible pour l'anagramme.
-	attempt := core.AutoAttemptFor(e)
-	fmt.Printf("Tentative: %q\n", attempt)
-	if won, err := e.SubmitAttempt(attempt); err != nil {
-		fmt.Println("erreur:", err)
-		return
-	} else if won {
-		fmt.Println("→ VICTOIRE !")
+	// Sauvegarde finale si pas d'arrêt par signal
+	log.Println("[main] Sauvegarde finale...")
+	if err := config.SaveSnapshot([]core.Player{p}, ""); err != nil {
+		log.Printf("[main] Erreur lors de la sauvegarde finale: %v", err)
 	} else {
-		fmt.Println("→ ÉCHEC.")
-	}
-
-	if err := e.Resolve(); err != nil {
-		fmt.Println("erreur:", err)
-	}
-
-	core.PrintPlayer(p)
-
-}
-
-func StartSpawner(ctx context.Context, ch chan<- SpawnEvent, interval time.Duration) {
-	for ctx.Err() != nil {
-		ch <- core.SpawnWord()
-		interval := 10 * time.Second
-		time.Sleep(interval)
+		log.Println("[main] Sauvegarde finale réussie")
 	}
 }

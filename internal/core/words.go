@@ -1,8 +1,11 @@
 package core
 
 import (
+	"context"
+	"fmt"
 	"math/rand"
 	"strconv"
+	"time"
 )
 
 var poolCommon = []Word{
@@ -47,4 +50,23 @@ func SpawnWord() Word {
 // Presentation retourne une fiche textuelle.
 func (w Word) Presentation() string {
 	return string(w.Rarity) + " — \"" + w.Text + "\" (+" + strconv.Itoa(w.Points) + " XP)"
+}
+
+func StartSpawner(ctx context.Context, ch chan<- SpawnEvent, interval time.Duration) {
+	defer close(ch)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	round := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			round++
+			w := SpawnWord()
+			fmt.Printf("Un Pokémon a spawn ! Round %d : %s\n", round, w.Text)
+			ch <- SpawnEvent{Round: round, Word: w}
+		}
+	}
 }

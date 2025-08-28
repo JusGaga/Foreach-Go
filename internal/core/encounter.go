@@ -1,7 +1,9 @@
 package core
 
 import (
+	"context"
 	"fmt"
+	"time"
 )
 
 type State string
@@ -17,78 +19,76 @@ const (
 )
 
 // Encounter orchestre une rencontre → combat → résolution.
-type Encounter struct {
-	state     State
-	player    *Player
-	word      Word
-	challenge Challenge
-}
 
-func NewEncounter() *Encounter { return &Encounter{state: StateIdle} }
+func NewEncounter() Encounter { return Encounter{Phase: StateIdle} }
 
-func (e *Encounter) State() State                { return e.state }
-func (e *Encounter) WordMon() Word               { return e.word }
-func (e *Encounter) CurrentChallenge() Challenge { return e.challenge }
+func (e Encounter) State() State                { return e.Phase }
+func (e Encounter) WordMon() Word               { return e.Word }
+func (e Encounter) CurrentChallenge() Challenge { return e.Challenge }
 
-func (e *Encounter) Start(p *Player) error {
-	if e.state != StateIdle {
-		return &InvalidStateError{From: string(e.state), Expected: string(StateIdle)}
+func (e *Encounter) Start(p *Player, spawnCh chan SpawnEvent, interval time.Duration) error {
+	if e.Phase != StateIdle {
+		return &InvalidStateError{From: string(e.Phase), Expected: string(StateIdle)}
 	}
-	e.player = p
-	e.word = SpawnWord()
-	if e.word.Text == "" { // bug interne, cas exceptionnel → panic
+	e.Player = p
+	ctx, cancel := context.WithCancel(context.Background())
+	e.Cancel = cancel
+	go StartSpawner(ctx, spawnCh, interval)
+	ev := <-spawnCh
+	e.Word = ev.Word
+	if e.Word.Text == "" { // bug interne, cas exceptionnel → panic
 		panic("WordMon invalide: mot vide")
 	}
-	e.state = StateEncounter
+	e.Phase = StateEncounter
 	return nil
 }
 
 func (e *Encounter) BeginBattle() error {
-	if e.state != StateEncounter {
-		return &InvalidStateError{From: string(e.state), Expected: string(StateEncounter)}
+	if e.Phase != StateEncounter {
+		return &InvalidStateError{From: string(e.Phase), Expected: string(StateEncounter)}
 	}
 	ch := &AnagramChallenge{}
-	ch.ResetFor(e.word.Rarity, e.word)
-	e.challenge = ch
-	e.state = StateInBattle
+	ch.ResetFor(e.Word.Rarity, e.Word)
+	e.Challenge = ch
+	e.Phase = StateInBattle
 	return nil
 }
 
 func (e *Encounter) SubmitAttempt(input string) (bool, error) {
-	if e.state != StateInBattle {
-		return false, &InvalidStateError{From: string(e.state), Expected: string(StateInBattle)}
+	if e.Phase != StateInBattle {
+		return false, &InvalidStateError{From: string(e.Phase), Expected: string(StateInBattle)}
 	}
-	ok, err := e.challenge.Check(input)
+	ok, err := e.Challenge.Check(input)
 	if err != nil {
 		return false, fmt.Errorf("erreur de tentative: %w", err)
 	}
 	if ok {
-		e.state = StateWon
+		e.Phase = StateWon
 	} else {
-		e.state = StateLost
+		e.Phase = StateLost
 	}
 	return ok, nil
 }
 
 func (e *Encounter) Resolve() error {
-	switch e.state {
+	switch e.Phase {
 	case StateWon:
-		_, err := Capture(e.player, e.word)
+		_, err := Capture(e.Player, e.Word)
 		if err != nil {
 			return fmt.Errorf("capture: %w", err)
 		}
-		if err := AwardXP(e.player, e.word.Points); err != nil {
+		if err := AwardXP(e.Player, e.Word.Points); err != nil {
 			return fmt.Errorf("xp: %w", err)
 		}
-		e.state = StateCaptured
+		e.Phase = StateCaptured
 		// retour à IDLE
-		e.state = StateIdle
+		e.Phase = StateEncounter
 		return nil
 	case StateLost:
-		e.state = StateFled
-		e.state = StateIdle
+		e.Phase = StateFled
+		e.Phase = StateEncounter
 		return nil
 	default:
-		return &InvalidStateError{From: string(e.state), Expected: "WON ou LOST"}
+		return &InvalidStateError{From: string(e.Phase), Expected: "WON ou LOST"}
 	}
 }
