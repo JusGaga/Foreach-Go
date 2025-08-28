@@ -1,0 +1,26 @@
+api:
+  server:
+    port: 8080
+    host: "localhost"
+    readTimeout: "30s"
+    writeTimeout: "30s"
+
+  cors:
+    enabled: true
+    allowedOrigins: ["*"]
+    allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allowedHeaders: ["Content-Type", "Authorization"]
+
+  logging:
+    level: "info"
+    format: "json"
+    output: "stdout"
+
+  rateLimit:
+    enabled: false
+    requestsPerMinute: 100
+
+  security:
+    enableAuth: false
+    jwtSecret: ""
+    sessionTimeout: "24h"

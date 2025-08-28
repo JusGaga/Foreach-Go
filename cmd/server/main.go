@@ -3,19 +3,18 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"log"
-	"math/rand"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/jusgaga/wordmon-go/internal/api"
 	"github.com/jusgaga/wordmon-go/internal/config"
 	"github.com/jusgaga/wordmon-go/internal/core"
 )
 
-var Version = "0.0.1" // peut être surchargée via -ldflags "-X 'main.Version=0.1.0'"
+var Version = "0.3.0" // peut être surchargée via -ldflags "-X 'main.Version=0.1.0'"
 
 func main() {
 	// Charger toutes les configurations
@@ -25,84 +24,112 @@ func main() {
 	}
 
 	// Afficher les informations de configuration
-	fmt.Printf("-------------------------------------------------\n")
-	fmt.Printf("WordMon Go v%s — Configuration chargée !\n", gameData.Game.Game.Version)
-	fmt.Printf("-------------------------------------------------\n")
+	log.Printf("-------------------------------------------------")
+	log.Printf("WordMon Go v%s — Configuration chargée !", gameData.Game.Game.Version)
+	log.Printf("-------------------------------------------------")
 
 	var (
 		showVersion bool
-		playerName  string
+		port        string
 	)
 	flag.BoolVar(&showVersion, "version", false, "affiche la version")
 	flag.BoolVar(&showVersion, "v", false, "affiche la version (abrégé)")
-
-	flag.StringVar(&playerName, "player", "", "nom du joueur")
-	flag.StringVar(&playerName, "p", "", "nom du joueur (abrégé)")
+	flag.StringVar(&port, "port", "8080", "port du serveur HTTP")
 
 	flag.Parse()
 
 	if showVersion {
-		fmt.Println("v" + Version)
+		log.Println("v" + Version)
 		os.Exit(0)
 	}
 
-	if playerName == "" {
-		playerName = "Guest"
-	}
+	// Créer les stores
+	playerStore := api.NewSimpleStore()
+	spawnStore := api.NewSimpleStore()
 
-	rand.Seed(time.Now().UnixNano())
+	// Créer le serveur API
+	server := api.NewServer(playerStore, spawnStore)
 
-	p := core.NewPlayer(playerName)
-
-	// ===== Exo 02: une rencontre simple =====
-	core.PrintPlayer(p)
-
+	// Gestion de l'arrêt propre
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Gestion de l'arrêt propre avec sauvegarde
+	// Configurer le spawner
+	spawnInterval := gameData.Game.SpawnInterval()
+	if spawnInterval == 0 {
+		spawnInterval = 30 * time.Second // fallback
+	}
+
+	// Canal pour les événements de spawn
+	spawnCh := make(chan core.SpawnEvent, 10)
+
+	// Goroutine pour traiter les spawns et les envoyer au store
+	go func() {
+		ticker := time.NewTicker(spawnInterval)
+		defer ticker.Stop()
+
+		round := 0
+		for {
+			select {
+			case <-ticker.C:
+				round++
+				word := core.SpawnWord()
+
+				spawnEvent := core.SpawnEvent{
+					Round: round,
+					Word:  word,
+				}
+
+				log.Printf("[spawn] Nouveau WordMon: %q (%s)", word.Text, word.Rarity)
+
+				// Envoyer l'événement de spawn
+				select {
+				case spawnCh <- spawnEvent:
+					// Événement envoyé avec succès
+				default:
+					// Canal plein, ignorer ce spawn
+					log.Printf("[spawn] Canal plein, spawn ignoré: %q", word.Text)
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Goroutine pour traiter les spawns et les envoyer au store
+	go func() {
+		for {
+			select {
+			case spawnEvent := <-spawnCh:
+				spawnStore.AddSpawn(spawnEvent)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	// Goroutine pour gérer l'arrêt propre
 	go func() {
 		<-sigChan
-		log.Println("[main] Arrêt demandé, sauvegarde en cours...")
+		log.Println("[main] Arrêt demandé, arrêt du serveur...")
 
-		// Sauvegarder le snapshot
-		if err := config.SaveSnapshot([]core.Player{p}, ""); err != nil {
-			log.Printf("[main] Erreur lors de la sauvegarde: %v", err)
-		} else {
-			log.Println("[main] Snapshot sauvegardé avec succès")
+		// Arrêter le serveur HTTP
+		if err := server.Stop(); err != nil {
+			log.Printf("[main] Erreur lors de l'arrêt du serveur: %v", err)
 		}
 
 		cancel()
 	}()
 
-	enc := core.NewEncounter()
+	// Démarrer le serveur HTTP
+	addr := ":" + port
+	log.Printf("[main] Démarrage du serveur API sur %s", addr)
+	log.Printf("[main] Spawner démarré avec intervalle: %v", spawnInterval)
 
-	spawnsCh := make(chan core.SpawnEvent, 1)
-	attemptsCh := make(chan core.Attempts, 1)
-
-	// Utiliser l'intervalle de spawn depuis la configuration
-	spawnInterval := gameData.Game.SpawnInterval()
-	if spawnInterval == 0 {
-		spawnInterval = 30 * time.Second // fallback
-	}
-
-	if err := enc.Start(&p, spawnsCh, spawnInterval); err != nil {
-		fmt.Println("erreur:", err)
-		return
-	}
-
-	log.Printf("[main] Démarrage du jeu avec intervalle de spawn: %v", spawnInterval)
-	core.StartListen(ctx, &p, spawnsCh, attemptsCh, spawnInterval, enc)
-
-	// Sauvegarde finale si pas d'arrêt par signal
-	log.Println("[main] Sauvegarde finale...")
-	if err := config.SaveSnapshot([]core.Player{p}, ""); err != nil {
-		log.Printf("[main] Erreur lors de la sauvegarde finale: %v", err)
-	} else {
-		log.Println("[main] Sauvegarde finale réussie")
+	if err := server.Start(addr); err != nil {
+		log.Fatal("[main] Erreur du serveur:", err)
 	}
 }
