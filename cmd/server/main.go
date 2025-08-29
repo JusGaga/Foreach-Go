@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -12,6 +13,7 @@ import (
 	"github.com/jusgaga/wordmon-go/internal/api"
 	"github.com/jusgaga/wordmon-go/internal/config"
 	"github.com/jusgaga/wordmon-go/internal/core"
+	_ "github.com/lib/pq"
 )
 
 var Version = "0.3.0" // peut être surchargée via -ldflags "-X 'main.Version=0.1.0'"
@@ -43,12 +45,54 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Créer les stores
-	playerStore := api.NewSimpleStore()
-	spawnStore := api.NewSimpleStore()
+	// Créer le store SQL avec retry
+	databaseURL := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s",
+		"postgres", "postgres", "localhost", "5432", "wordmon", "disable")
 
-	// Créer le serveur API
-	server := api.NewServer(playerStore, spawnStore)
+	var sqlStore *api.SQLStore
+	maxRetries := 30
+	retryDelay := 2 * time.Second
+
+	log.Printf("[main] Tentative de connexion à la base de données...")
+
+	for i := 0; i < maxRetries; i++ {
+		var err error
+		sqlStore, err = api.NewSQLStore(databaseURL)
+		if err == nil {
+			log.Printf("[main] Connexion à la base de données réussie!")
+			break
+		}
+
+		log.Printf("[main] Tentative %d/%d échouée: %v", i+1, maxRetries, err)
+
+		if i < maxRetries-1 {
+			log.Printf("[main] Nouvelle tentative dans %v...", retryDelay)
+			time.Sleep(retryDelay)
+		} else {
+			log.Fatal("[main] Échec de la connexion à la base de données après", maxRetries, "tentatives")
+		}
+	}
+
+	defer sqlStore.Close()
+
+	// Charger les mots dans la base de données
+	words := gameData.Words
+	coreWords := make([]core.Word, len(words))
+	for i, word := range words {
+		coreWords[i] = core.Word{
+			ID:     word.ID,
+			Text:   word.Text,
+			Rarity: core.Rarity(word.Rarity),
+			Points: 10, // Points par défaut
+		}
+	}
+
+	if err := sqlStore.Seed(coreWords); err != nil {
+		log.Fatal("[main] Échec du seeding de la base de données:", err)
+	}
+
+	// Créer le serveur API avec le store SQL
+	server := api.NewServer(sqlStore, sqlStore)
 
 	// Gestion de l'arrêt propre
 	ctx, cancel := context.WithCancel(context.Background())
@@ -101,7 +145,7 @@ func main() {
 		for {
 			select {
 			case spawnEvent := <-spawnCh:
-				spawnStore.AddSpawn(spawnEvent)
+				sqlStore.AddSpawn(spawnEvent)
 			case <-ctx.Done():
 				return
 			}

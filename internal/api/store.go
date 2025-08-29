@@ -92,6 +92,21 @@ func (s *SimpleStore) UpdatePlayer(player *PlayerResponse) error {
 	return nil
 }
 
+// UpdateXP met à jour l'XP et le niveau d'un joueur
+func (s *SimpleStore) UpdateXP(id string, newXP int, newLevel int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	player, exists := s.players[id]
+	if !exists {
+		return &PlayerNotFoundError{ID: id}
+	}
+
+	player.XP = newXP
+	player.Level = newLevel
+	return nil
+}
+
 // AddSpawn ajoute un spawn à l'historique
 func (s *SimpleStore) AddSpawn(spawn interface{}) error {
 	s.mu.Lock()
