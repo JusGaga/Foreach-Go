@@ -1,4 +1,4 @@
-.PHONY: fmt vet lint test test-race test-cover build all clean
+.PHONY: fmt vet lint test test-race test-cover build all clean tools quality godoc
 
 # Variables
 BINARY_NAME=server
@@ -62,8 +62,17 @@ tools:
 	@echo "Installation des outils de developpement..."
 	go install honnef.co/go/tools/cmd/staticcheck@latest
 	go install github.com/go-delve/delve/cmd/dlv@latest
+	go install golang.org/x/tools/cmd/godoc@latest
 	@echo "Outils installes"
 
 # Vérification complète de la qualité
 quality: fmt vet lint test test-race test-cover
 	@echo "Verification de la qualite terminee"
+
+# Lancement de la documentation
+godoc:
+	@echo "Lancement du serveur de documentation..."
+	@echo "Documentation accessible sur: http://localhost:6060"
+	@echo "Appuyez sur Ctrl+C pour arreter le serveur"
+	@echo ""
+	godoc -http=:6060
