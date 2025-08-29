@@ -11,14 +11,14 @@ import (
 )
 
 const (
-	envSnapshotPath = "WORDMON_SNAPSHOT_PATH"
+	envSnapshotPath     = "WORDMON_SNAPSHOT_PATH"
 	DefaultSnapshotPath = "data/snapshot.json"
 )
 
 // Snapshot représente l'état sauvegardé du jeu
 type Snapshot struct {
-	UpdatedAt time.Time           `json:"updatedAt"`
-	Players   []PlayerSnapshot    `json:"players"`
+	UpdatedAt time.Time        `json:"updatedAt"`
+	Players   []PlayerSnapshot `json:"players"`
 }
 
 // PlayerSnapshot représente l'état sauvegardé d'un joueur
@@ -60,18 +60,18 @@ func SaveSnapshot(players []core.Player, path string) error {
 			Level:     p.Level,
 			Inventory: make(map[string]int),
 		}
-		
+
 		// Copier l'inventaire
 		for word, count := range p.Inventory {
 			ps.Inventory[word] = count
 		}
-		
+
 		snapshot.Players = append(snapshot.Players, ps)
 	}
 
 	// Écrire d'abord dans un fichier temporaire pour éviter la corruption
 	tempPath := path + ".tmp"
-	
+
 	// Encoder en JSON avec indentation
 	data, err := json.MarshalIndent(snapshot, "", " ")
 	if err != nil {

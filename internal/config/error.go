@@ -6,7 +6,7 @@ import (
 )
 
 type ValidationError struct {
-	Section string
+	Section  string
 	Problems []string
 }
 
@@ -38,8 +38,8 @@ func (e *UnsupportedFormatError) Error() string {
 }
 
 type EnvOverrideError struct {
-	Var   string
-	Value string
+	Var    string
+	Value  string
 	Reason string
 }
 

@@ -1,3 +1,5 @@
+// Package core contient la logique métier du jeu WordMon.
+// Il gère les joueurs, leurs interactions avec les mots et les mécaniques de progression.
 package core
 
 import (
@@ -8,6 +10,7 @@ import (
 )
 
 // LevelFromXP calcule un niveau simple: 1 + XP/100.
+// Le niveau augmente de 1 tous les 100 points d'expérience.
 func LevelFromXP(xp int) int {
 	if xp < 0 {
 		return 1
@@ -16,6 +19,7 @@ func LevelFromXP(xp int) int {
 }
 
 // AwardXP ajoute des points et recalcule le niveau.
+// Met à jour l'expérience du joueur et recalcule automatiquement son niveau.
 func AwardXP(p *Player, points int) error {
 	if points < 0 {
 		return &NegativePointsError{Points: points}
@@ -26,6 +30,7 @@ func AwardXP(p *Player, points int) error {
 }
 
 // Capture ajoute le mot à l'inventaire et retourne les points gagnés.
+// Vérifie que le mot n'est pas vide avant de l'ajouter à l'inventaire.
 func Capture(p *Player, w Word) (int, error) {
 	if w.Text == "" {
 		return 0, &CaptureError{Word: w.Text, Reason: "mot vide"}
@@ -34,6 +39,8 @@ func Capture(p *Player, w Word) (int, error) {
 	return w.Points, nil
 }
 
+// NewPlayer crée un nouveau joueur avec les valeurs par défaut.
+// Initialise un joueur avec 0 XP, niveau 1 et un inventaire vide.
 func NewPlayer(name string) Player {
 	return Player{
 		ID:        "ID",
@@ -44,12 +51,15 @@ func NewPlayer(name string) Player {
 	}
 }
 
+// PrintPlayer affiche les informations d'un joueur.
+// Affiche le nom, l'XP, le niveau et la taille de l'inventaire.
 func PrintPlayer(p Player) {
 	fmt.Printf("Joueur: %s | XP: %d | Level: %d | Inventaire: %d mot(s)\n",
 		p.Name, p.XP, p.Level, len(p.Inventory))
 }
 
 // StartListen orchestre les rounds en utilisant la machine d'états Encounter.
+// Gère le cycle de jeu principal avec les apparitions de mots et les tentatives de capture.
 func StartListen(ctx context.Context, p *Player, spawns chan SpawnEvent, attempts chan Attempts, interval time.Duration, enc Encounter) {
 	if interval <= 0 {
 		interval = time.Second
@@ -108,7 +118,7 @@ func StartListen(ctx context.Context, p *Player, spawns chan SpawnEvent, attempt
 					fmt.Printf("[Round %d] Erreur de résolution pour %q: %v\n", att.Round, enc.Word.Text, err)
 				}
 				issue := map[bool]string{true: "VICTOIRE", false: "DEFAITE"}[att.Won]
-				if att.Won == true {
+				if att.Won {
 					if points, err := Capture(p, att.Word); err != nil {
 						fmt.Printf("[Round %d] Erreur: %q \n", att.Round, err)
 					} else if points > 0 {

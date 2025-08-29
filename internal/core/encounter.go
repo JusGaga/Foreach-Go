@@ -1,3 +1,5 @@
+// Package core contient la machine à états des rencontres WordMon.
+// Il gère les transitions d'état entre les différentes phases d'une rencontre.
 package core
 
 import (
@@ -6,6 +8,7 @@ import (
 	"time"
 )
 
+// State représente l'état actuel d'une rencontre.
 type State string
 
 const (
@@ -18,14 +21,21 @@ const (
 	StateFled      State = "FLED"
 )
 
-// Encounter orchestre une rencontre → combat → résolution.
-
+// NewEncounter crée une nouvelle rencontre dans l'état IDLE.
+// Initialise une rencontre vide prête à démarrer.
 func NewEncounter() Encounter { return Encounter{Phase: StateIdle} }
 
-func (e Encounter) State() State                { return e.Phase }
-func (e Encounter) WordMon() Word               { return e.Word }
+// State retourne l'état actuel de la rencontre.
+func (e Encounter) State() State { return e.Phase }
+
+// WordMon retourne le mot actuellement rencontré.
+func (e Encounter) WordMon() Word { return e.Word }
+
+// CurrentChallenge retourne le défi actuel de la rencontre.
 func (e Encounter) CurrentChallenge() Challenge { return e.Challenge }
 
+// Start démarre une nouvelle rencontre pour un joueur.
+// Initialise le spawner et attend l'apparition d'un mot.
 func (e *Encounter) Start(p *Player, spawnCh chan SpawnEvent, interval time.Duration) error {
 	if e.Phase != StateIdle {
 		return &InvalidStateError{From: string(e.Phase), Expected: string(StateIdle)}
@@ -43,6 +53,8 @@ func (e *Encounter) Start(p *Player, spawnCh chan SpawnEvent, interval time.Dura
 	return nil
 }
 
+// BeginBattle lance le combat en initialisant le défi.
+// Passe de l'état ENCOUNTERED à IN_BATTLE.
 func (e *Encounter) BeginBattle() error {
 	if e.Phase != StateEncounter {
 		return &InvalidStateError{From: string(e.Phase), Expected: string(StateEncounter)}
@@ -54,6 +66,8 @@ func (e *Encounter) BeginBattle() error {
 	return nil
 }
 
+// SubmitAttempt soumet une tentative de résolution du défi.
+// Vérifie la réponse et met à jour l'état selon le résultat.
 func (e *Encounter) SubmitAttempt(input string) (bool, error) {
 	if e.Phase != StateInBattle {
 		return false, &InvalidStateError{From: string(e.Phase), Expected: string(StateInBattle)}
@@ -70,6 +84,8 @@ func (e *Encounter) SubmitAttempt(input string) (bool, error) {
 	return ok, nil
 }
 
+// Resolve finalise la rencontre selon l'état actuel.
+// Gère la capture en cas de victoire ou la fuite en cas de défaite.
 func (e *Encounter) Resolve() error {
 	switch e.Phase {
 	case StateWon:
